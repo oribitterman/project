@@ -14,7 +14,7 @@ from threading import Event, Thread
 import pyautogui
 
 # Server address - configurable via environment variables
-SERVER_HOST = os.getenv('SERVER_HOST', '192.168.0.254')
+SERVER_HOST = os.getenv('SERVER_HOST', '192.168.0.188')
 SCREEN_PORT = int(os.getenv('SCREEN_PORT', '12345'))
 INPUT_PORT = int(os.getenv('INPUT_PORT', '12346'))
 
@@ -199,19 +199,21 @@ def main():
                     # Capture screen
                     img = np.array(sct.grab(monitor))
 
-                    # Convert from BGRA to RGB with improved color accuracy
-                    # Use OpenCV's color conversion with enhanced color correction
-                    img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGB)
+                    # FIX: Proper color conversion for screen capture
+                    # mss captures in BGRA format, so we need to convert it correctly
+                    # The issue was the color channel ordering - BGR vs RGB
 
-                    # Enhance contrast and color saturation slightly (optional)
-                    img = cv2.convertScaleAbs(img, alpha=1.1, beta=0)
+                    # Method 1: Direct BGR to RGB conversion (more accurate)
+                    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
 
                     # Scale if needed
                     if SCALE_FACTOR != 1.0:
-                        img = cv2.resize(img, (capture_width, capture_height), interpolation=cv2.INTER_LANCZOS4)
+                        img_rgb = cv2.resize(img_rgb, (capture_width, capture_height),
+                                             interpolation=cv2.INTER_AREA)
 
-                    # Compress as JPEG
-                    _, buffer = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, QUALITY])
+                    # Compress as JPEG with proper color encoding
+                    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), QUALITY]
+                    _, buffer = cv2.imencode('.jpg', img_rgb, encode_param)
 
                     # Send frame size then frame data
                     frame_data = buffer.tobytes()
