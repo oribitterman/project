@@ -8,7 +8,7 @@ import time
 import os
 
 # Server address - configurable via environment variables
-SERVER_HOST = os.getenv('SERVER_HOST', '192.168.0.254')
+SERVER_HOST = os.getenv('SERVER_HOST', '192.168.0.188')
 SCREEN_PORT = int(os.getenv('SCREEN_PORT', '12345'))
 INPUT_PORT = int(os.getenv('INPUT_PORT', '12346'))
 
@@ -136,14 +136,14 @@ def toggle_fullscreen():
     pygame.display.flip()
 
 
-def handle_mouse():
-    global screen, remote_width, remote_height, mouse_pressed
+def handle_mouse_motion(x, y):
+    """Handle mouse motion events and send normalized coordinates to the controlled client"""
+    global screen, remote_width, remote_height, input_socket
 
     if screen is None or input_socket is None:
         return
 
     screen_width, screen_height = screen.get_size()
-    x, y = pygame.mouse.get_pos()
 
     # Get the current display area dimensions (accounting for letterboxing)
     display_width, display_height, offset_x, offset_y = get_display_dimensions(screen_width, screen_height)
@@ -153,9 +153,6 @@ def handle_mouse():
         # Normalize position within the display area (0.0 to 1.0)
         norm_x = (x - offset_x) / display_width
         norm_y = (y - offset_y) / display_height
-
-        # Debug output
-        # print(f"Mouse: {x},{y} -> Norm: {norm_x:.2f},{norm_y:.2f}")
 
         # Send normalized mouse position
         try:
@@ -168,40 +165,32 @@ def handle_mouse():
         except Exception as e:
             print(f"Error sending mouse position: {e}")
 
-    # Get current mouse button state
-    current_buttons = pygame.mouse.get_pressed()
-    left_pressed = bool(current_buttons[0])
-    right_pressed = bool(current_buttons[2])
 
-    # Handle left mouse button
-    if left_pressed != mouse_pressed["left"]:
-        mouse_pressed["left"] = left_pressed
+def handle_mouse_button(button, pressed):
+    """Handle mouse button events and send to the controlled client"""
+    global input_socket
 
-        # Send mouse click event
+    if input_socket is None:
+        return
+
+    # Map pygame button numbers to button names
+    button_map = {
+        1: 'left',  # Left button
+        3: 'right'  # Right button
+    }
+
+    button_name = button_map.get(button)
+    if button_name:
         try:
             mouse_data = {
                 'type': 'click',
-                'button': 'left',
-                'action': 'press' if left_pressed else 'release'
+                'button': button_name,
+                'action': 'press' if pressed else 'release'
             }
             sendmsg(input_socket, mouse_data)
+            print(f"Mouse {button_name} {mouse_data['action']} sent")
         except Exception as e:
-            print(f"Error sending left click: {e}")
-
-    # Handle right mouse button
-    if right_pressed != mouse_pressed["right"]:
-        mouse_pressed["right"] = right_pressed
-
-        # Send mouse click event
-        try:
-            mouse_data = {
-                'type': 'click',
-                'button': 'right',
-                'action': 'press' if right_pressed else 'release'
-            }
-            sendmsg(input_socket, mouse_data)
-        except Exception as e:
-            print(f"Error sending right click: {e}")
+            print(f"Error sending mouse click: {e}")
 
 
 def get_display_dimensions(screen_width, screen_height):
@@ -275,11 +264,16 @@ def main():
         connection_active = False
         clock = pygame.time.Clock()
 
+        # Start tracking mouse movement with pygame events
+        pygame.event.set_allowed([pygame.QUIT, pygame.KEYDOWN, pygame.KEYUP,
+                                  pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP])
+
         while True:
             # Process all pygame events
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     raise KeyboardInterrupt("User closed the window")
+
                 elif event.type == pygame.KEYDOWN:
                     # Handle key press events
                     if event.key == pygame.K_F11:
@@ -289,15 +283,23 @@ def main():
                     else:
                         # Forward other key presses to the controlled client
                         handle_key_event(event.key, 'press')
+
                 elif event.type == pygame.KEYUP:
                     # Handle key release events
                     if event.key not in [pygame.K_F11, pygame.K_ESCAPE]:
                         # Forward key releases to controlled client
                         handle_key_event(event.key, 'release')
 
-            # Always handle mouse for interaction with remote system
-            if connection_active:
-                handle_mouse()
+                # Handle mouse events if connection is active
+                if connection_active:
+                    if event.type == pygame.MOUSEMOTION:
+                        handle_mouse_motion(event.pos[0], event.pos[1])
+
+                    elif event.type == pygame.MOUSEBUTTONDOWN:
+                        handle_mouse_button(event.button, True)
+
+                    elif event.type == pygame.MOUSEBUTTONUP:
+                        handle_mouse_button(event.button, False)
 
             # Process incoming screen data
             try:
